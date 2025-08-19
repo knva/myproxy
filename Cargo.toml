@@ -1,0 +1,10 @@
+[package]
+name = "mypproxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
+base64 = "0.22"
+url = "2.5.0"
