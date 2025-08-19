@@ -12,6 +12,7 @@ use hyper::body::Bytes;
 
 use clap::Parser;
 use base64::{Engine as _, engine::general_purpose};
+use fdlimit;
 
 /// A robust HTTP proxy that requires basic authentication.
 #[derive(Parser, Debug)]
@@ -27,6 +28,9 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Raise the file descriptor limit on Windows
+    let _ = fdlimit::raise_fd_limit();
+
     let args = Args::parse();
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     let credentials = Arc::new((args.username, args.password));
