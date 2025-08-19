@@ -46,16 +46,14 @@ jobs:
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package binary
-        shell: bash
-        run: |
-          cd target/${{ matrix.target }}/release
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            zip ../../../${{ matrix.asset_name_suffix }} ${{ matrix.binary_name }}
-          else
-            tar czvf ../../../${{ matrix.asset_name_suffix }} ${{ matrix.binary_name }}
-          fi
-          cd ../../../
+      - name: Package binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: Compress-Archive -Path target\${{ matrix.target }}\release\${{ matrix.binary_name }} -DestinationPath ${{ matrix.asset_name_suffix }}
+        shell: pwsh
+
+      - name: Package binary (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: tar czvf ${{ matrix.asset_name_suffix }} -C target/${{ matrix.target }}/release ${{ matrix.binary_name }}
 
       - name: Release
         uses: softprops/action-gh-release@v1

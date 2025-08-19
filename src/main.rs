@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use clap::Parser;
 use base64::{Engine as _, engine::general_purpose};
 
-/// A simple HTTP proxy that supports basic authentication and CONNECT method.
+/// A simple HTTP proxy that requires basic authentication and supports CONNECT method.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -16,25 +16,21 @@ struct Args {
     port: u16,
 
     /// Username for authentication
-    #[arg(short, long)]
-    username: Option<String>,
+    #[arg(short, long, required = true)]
+    username: String,
 
     /// Password for authentication
-    #[arg(long)]
-    password: Option<String>,
+    #[arg(long, required = true)]
+    password: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    if args.username.is_some() && args.password.is_none() {
-        return Err("Password is required when username is provided.".into());
-    }
-
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     let listener = TcpListener::bind(addr).await?;
-    println!("HTTP proxy listening on {}", addr);
+    println!("HTTP proxy listening on {}, authentication is required.", addr);
 
     let credentials = Arc::new((args.username, args.password));
 
@@ -49,19 +45,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, credentials: Arc<(Option<String>, Option<String>)>) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_connection(mut stream: TcpStream, credentials: Arc<(String, String)>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 4096];
     let n = stream.read(&mut buffer).await?;
     let request_str = String::from_utf8_lossy(&buffer[..n]);
 
-    let (username, password) = &*credentials;
-    if let (Some(user), Some(pass)) = (username, password) {
-        let auth_header = request_str.lines()
-            .find(|line| line.to_lowercase().starts_with("proxy-authorization:"));
+    let (user, pass) = &*credentials;
+    let auth_header = request_str.lines()
+        .find(|line| line.to_lowercase().starts_with("proxy-authorization:"));
 
-        let mut authenticated = false;
-        if let Some(header) = auth_header {
-            if let Some(encoded) = header.split_whitespace().nth(1) {
+    let mut authenticated = false;
+    if let Some(header_line) = auth_header {
+        if let Some(colon_pos) = header_line.find(':') {
+            let value = &header_line[colon_pos + 1..].trim();
+            if value.to_lowercase().starts_with("basic ") {
+                let encoded = &value[6..];
                 if let Ok(decoded_bytes) = general_purpose::STANDARD.decode(encoded) {
                     if let Ok(decoded_str) = String::from_utf8(decoded_bytes) {
                         let mut parts = decoded_str.splitn(2, ':');
@@ -74,12 +72,12 @@ async fn handle_connection(mut stream: TcpStream, credentials: Arc<(Option<Strin
                 }
             }
         }
+    }
 
-        if !authenticated {
-            let response = "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\n\r\n";
-            stream.write_all(response.as_bytes()).await?;
-            return Ok(());
-        }
+    if !authenticated {
+        let response = "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"Proxy\"\r\n\r\n";
+        stream.write_all(response.as_bytes()).await?;
+        return Ok(());
     }
 
     let mut lines = request_str.lines();
@@ -112,7 +110,7 @@ async fn handle_connection(mut stream: TcpStream, credentials: Arc<(Option<Strin
         new_first_line.push_str(" HTTP/1.1\r\n");
 
         let mut new_request = new_first_line.to_string();
-        new_request.push_str(&format!("Host: {}\r\n", host));
+        new_request.push_str(&format!("Host: {}\\r\\n", host));
         for line in lines {
             if !line.to_lowercase().starts_with("proxy-authorization:") && !line.to_lowercase().starts_with("host:") {
                 new_request.push_str(line);
